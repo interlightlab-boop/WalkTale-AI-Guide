@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Clock, Map, Mic2, Cpu, FileText, ScrollText, DollarSign, MapPin, Navigation, Users, TrendingUp, AlertTriangle, Utensils, Binoculars } from 'lucide-react';
+import { X, Clock, Map, Cpu, FileText, ScrollText, DollarSign, MapPin, Users, TrendingUp, AlertTriangle, Utensils } from 'lucide-react';
 import { TourSessionReport } from '../types';
 
 interface TestReportModalProps {
@@ -207,7 +207,8 @@ const TestReportModal: React.FC<TestReportModalProps> = ({ report, onClose }) =>
                 {/* 🔥 SPLIT: Landmark Search (Auto/Tour triggered) */}
                 <div className="flex justify-between items-center p-2 bg-blue-50 rounded-lg border border-blue-100">
                     <div className="text-xs text-blue-900">
-                        <span className="font-bold flex items-center gap-1"><Binoculars size={10} /> Landmark Scan (Tour)</span>
+                        {/* ⚡ Replaced Landmark icon with MapPin to fix build error */}
+                        <span className="font-bold flex items-center gap-1"><MapPin size={10} /> Landmark Scan (Tour)</span>
                         <span className="text-[10px] text-blue-400">$32.00 / 1k requests</span>
                     </div>
                     <div className="text-right">

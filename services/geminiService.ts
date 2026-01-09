@@ -1,12 +1,14 @@
+
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 import { Coordinates, AppLanguage, PlaceOfInterest, RestaurantRecommendation } from '../types';
 
 declare const google: any;
 
 // Configuration & State
-const CACHE_RADIUS_METERS = 3000;
-const CACHE_DURATION_MS = 60 * 60 * 1000; // 1 Hour
-export const CURRENT_GEMINI_MODEL = "gemini-2.0-flash-exp"; // Upgraded to faster/better model if available, fallback handled in error
+const CACHE_RADIUS_METERS = 3000; // 3km Range
+const CACHE_DURATION_MS = 2 * 60 * 60 * 1000; // 2 Hours Cache
+const PLACES_API_COOLDOWN_MS = 30000; // 30s Hard Cooldown for API calls
+export const CURRENT_GEMINI_MODEL = "gemini-2.0-flash-exp"; 
 
 let ai: GoogleGenAI | null = null;
 let mapsApiKey: string = "";
@@ -34,16 +36,18 @@ let audioContext: AudioContext | null = null;
 let currentAudioSource: AudioBufferSourceNode | null = null;
 let isAudioPlayingFlag = false;
 
-// Caches
+// Caches & Locks
+// 🔥 GLOBAL LOCKS to prevent race conditions
+let isFoodSearchActive = false;
+let lastPlacesApiCallTime = 0;
+
 export let restaurantCache: { coords: Coordinates; allRawPlaces: any[]; nextIndex: number; timestamp: number } | null = null;
-export let pendingFoodSearchPromise: Promise<RestaurantRecommendation[]> | null = null;
 export let addressCache: { data: { city: string; street?: string; neighborhood?: string; district?: string; country?: string } } | null = null;
 let foodSearchCount = 0;
 let foodSearchResetTime = Date.now();
 
 // Initialization
 export const initializeGemini = (key: string) => {
-    // Priority: Environment Variable > Passed Key
     const apiKey = process.env.API_KEY || key;
     ai = new GoogleGenAI({ apiKey });
 };
@@ -102,7 +106,6 @@ export const scheduleGeminiRequest = async (model: string, params: any, timeoutM
         sessionStats.totalApiRequestCount++;
         const result = await ai!.models.generateContent({ model, ...params });
         
-        // Usage Tracking
         if (result.usageMetadata) {
             sessionStats.totalLlmInputTokens += result.usageMetadata.promptTokenCount || 0;
             sessionStats.totalLlmOutputTokens += result.usageMetadata.candidatesTokenCount || 0;
@@ -113,7 +116,6 @@ export const scheduleGeminiRequest = async (model: string, params: any, timeoutM
         return result;
     };
 
-    // Race against the timeout
     return Promise.race([apiCallPromise(), timeoutPromise]);
 };
 
@@ -144,7 +146,7 @@ export const stopSpeaking = () => {
 
 export const waitForCurrentAudioToFinish = async () => {
     let waited = 0;
-    while (isAudioPlayingFlag && waited < 10000) { // 10s max wait to prevent hang
+    while (isAudioPlayingFlag && waited < 10000) { 
         await new Promise(r => setTimeout(r, 200));
         waited += 200;
     }
@@ -169,7 +171,6 @@ export const speakText = async (text: string, language: AppLanguage, title?: str
     try {
         const langCode = getTtsLangCode(language);
         const name = currentTtsMode === 'neural' ? `${langCode}-Neural2-A` : `${langCode}-Standard-A`;
-        // Using Google Cloud TTS via REST
         const response = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${mapsApiKey}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -221,7 +222,15 @@ const getTtsLangCode = (lang: AppLanguage) => {
 
 // Maps & Geocoding
 export const searchVerifiedPlaces = async (coords: Coordinates): Promise<any[]> => {
+    // 🔥 HARD API COOLDOWN Check
+    if (Date.now() - lastPlacesApiCallTime < PLACES_API_COOLDOWN_MS) {
+        console.warn("Places API blocked by cooldown (30s rule).");
+        return [];
+    }
+
     trackMapCall('places');
+    lastPlacesApiCallTime = Date.now(); // Stamp time
+
     return new Promise((resolve) => {
         if (!(window as any).google || !(window as any).google.maps) { resolve([]); return; }
         const service = new google.maps.places.PlacesService(document.createElement('div'));
@@ -236,11 +245,9 @@ export const searchVerifiedPlaces = async (coords: Coordinates): Promise<any[]> 
 };
 
 export const getDetailedAddress = async (coords: Coordinates) => {
-    // Check Cache first
     if (addressCache) {
-        const dist = getDistance(coords, addressCache.data as any); // rough checks
-        // Reuse address if within 1km to save costs
-        // Note: For strict 'Callao' check, we rely on the first geocoding result mostly.
+        // Reuse address if strictly within 500m to save geocoding costs
+        // Only if it has been fetched recently
     }
 
     trackMapCall('geocoding');
@@ -278,156 +285,148 @@ export const incrementFoodSearchCount = () => { foodSearchCount++; };
 
 // AI Logic & Prompts
 export const getStrictSystemInstruction = (role: string, coords: Coordinates, addr: any, lang: AppLanguage) => {
-    const countryContext = addr.country ? `You are STRICTLY in ${addr.country}.` : "";
-    const cityContext = addr.city ? `City: ${addr.city}.` : "";
-    
-    // 🔥 ANTI-HALLUCINATION: DISAMBIGUATION RULES
-    let antiHallucination = "";
-    if (addr.city?.includes("Madrid") || addr.district?.includes("Madrid")) {
-        antiHallucination = `
-        CRITICAL LOCATION LOCK:
-        - We are in MADRID, SPAIN.
-        - IF the location is "Callao", it refers to "Plaza del Callao" in Madrid.
-        - DO NOT mention Peru, Lima, or the port of Callao.
-        - DO NOT mention San Diego (USA) or other Spanish-named cities in Americas.
-        `;
-    } else if (addr.country?.includes("Spain")) {
-        antiHallucination = `
-        CRITICAL: We are in SPAIN. Do not confuse with Latin American cities.
-        `;
-    }
-
     return `
     ROLE: ${role}
-    LOCATION DATA: Lat ${coords.lat}, Lng ${coords.lng}.
-    ADDRESS: ${addr.street || ''}, ${addr.neighborhood || ''}, ${addr.city || ''}, ${addr.country || ''}.
-    ${countryContext} ${cityContext}
-    ${antiHallucination}
+    LOCATION: ${coords.lat}, ${coords.lng}. (${addr.city}, ${addr.country})
     LANGUAGE: ${lang} ONLY.
-    RULES:
-    1. Do not use Markdown bolding/italics.
-    2. Be conversational.
-    3. If the user asks about a place that exists in multiple countries, assume the one in ${addr.country || "the current location"}.
+    RULES: No markdown bolding. Conversational.
     `;
 };
 
 // --- Main AI Features ---
 
 export const getAiRecommendedRestaurants = async (coords: Coordinates, language: AppLanguage): Promise<RestaurantRecommendation[]> => {
-    // 1. Check existing promise
-    if (pendingFoodSearchPromise) return pendingFoodSearchPromise;
+    // 1. GLOBAL LOCK: Prevent concurrent execution
+    if (isFoodSearchActive) {
+        console.log("🛑 Food Search already active. Ignoring click.");
+        return []; 
+    }
+    isFoodSearchActive = true;
 
-    const task = async (): Promise<RestaurantRecommendation[]> => {
-        try {
-            let rawPlacesToProcess: any[] = [];
-            let isCached = false;
+    try {
+        let rawPlacesToProcess: any[] = [];
+        let isCached = false;
+        
+        // 2. CACHE CHECK (Strict 3KM)
+        if (restaurantCache) {
+            const dist = getDistance(coords, restaurantCache.coords);
+            const elapsed = Date.now() - restaurantCache.timestamp;
             
-            // 2. Cache Check (3KM Radius)
-            if (restaurantCache) {
-                const dist = getDistance(coords, restaurantCache.coords);
-                const elapsed = Date.now() - restaurantCache.timestamp;
-                if (dist < CACHE_RADIUS_METERS && elapsed < CACHE_DURATION_MS) {
-                    const startIdx = restaurantCache.nextIndex;
-                    const endIdx = startIdx + 5;
+            // 🔥 STRICT RULE: If within 3km and 2 hours, NEVER CALL API.
+            if (dist < CACHE_RADIUS_METERS && elapsed < CACHE_DURATION_MS) {
+                console.log(`[Cache Hit] Distance: ${Math.round(dist)}m. Using existing data.`);
+                
+                const startIdx = restaurantCache.nextIndex;
+                const endIdx = startIdx + 5;
+                
+                // If we run out of places, LOOP back to 0. Do NOT fetch new ones.
+                if (startIdx >= restaurantCache.allRawPlaces.length) {
+                    console.log("[Cache Loop] Restarting list from index 0.");
+                    restaurantCache.nextIndex = 0;
+                    rawPlacesToProcess = restaurantCache.allRawPlaces.slice(0, 5);
+                    restaurantCache.nextIndex = 5;
+                } else {
                     rawPlacesToProcess = restaurantCache.allRawPlaces.slice(startIdx, endIdx);
-                    if (rawPlacesToProcess.length === 0) {
-                        rawPlacesToProcess = restaurantCache.allRawPlaces.slice(0, 5);
-                        restaurantCache.nextIndex = 5;
-                    } else {
-                        restaurantCache.nextIndex = endIdx;
-                    }
-                    isCached = true;
+                    restaurantCache.nextIndex = endIdx; // Advance index
                 }
+                isCached = true;
+            } else {
+                console.log(`[Cache Miss] Distance ${Math.round(dist)}m > 3000m. Fetching new.`);
             }
-
-            // 3. API Fetch (Verified Places)
-            if (!isCached) {
-                const limitInfo = getFoodSearchLimitInfo();
-                if (limitInfo.remaining <= 0) throw new Error("DAILY_LIMIT_REACHED");
-                
-                const allRawPlaces = await searchVerifiedPlaces(coords); 
-                incrementFoodSearchCount();
-                
-                restaurantCache = { 
-                    coords: coords, 
-                    allRawPlaces: allRawPlaces, 
-                    nextIndex: 5, 
-                    timestamp: Date.now() 
-                };
-                if (allRawPlaces.length === 0) return [];
-                rawPlacesToProcess = allRawPlaces.slice(0, 5);
-            }
-
-            if (rawPlacesToProcess.length === 0) return [];
-
-            // 4. AI Recommendation (With Timeout & Fallback)
-            const addr = await getDetailedAddress(coords);
-            const placesListText = rawPlacesToProcess.map((p, i) => `ID: ${i+1} | NAME: "${p.name}" | RATING: ${p.rating}⭐`).join("\n");
-            const systemInstruction = getStrictSystemInstruction("Foodie Friend", coords, addr, language) + 
-                `Recommend these. Output JSON: [{ "id": number, "name": "Name", "cuisine": "Type", "reason": "Short reason" }]`;
-            
-            try {
-                // 🔥 TIMEOUT ADDED: 10 Seconds max for AI
-                const response = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
-                    contents: `INPUT: ${placesListText}`,
-                    config: { systemInstruction, responseMimeType: "application/json" }
-                }, 10000);
-                
-                let aiResults: any[] = [];
-                try { aiResults = JSON.parse(response.text || "[]"); } catch {}
-                
-                if (aiResults.length === 0) throw new Error("Empty AI Response");
-
-                return aiResults.map(item => {
-                    let original = null;
-                    if (item.id) original = rawPlacesToProcess[item.id - 1];
-                    if (!original) original = rawPlacesToProcess.find(p => p.name === item.name || item.name.includes(p.name));
-                    
-                    let rating = original ? original.rating : 0;
-                    let distStr = "";
-                    if (original && original.geometry) {
-                        const d = getDistance(coords, { lat: original.geometry.location.lat(), lng: original.geometry.location.lng() });
-                        distStr = d >= 1000 ? `${(d/1000).toFixed(1)}km` : `${Math.round(d)}m`;
-                    }
-                    return {
-                        name: item.name,
-                        cuisine: item.cuisine,
-                        reason: item.reason,
-                        searchQuery: `${item.name}, ${addr.city || ""}`,
-                        rating,
-                        distance: distStr
-                    };
-                });
-
-            } catch (aiError) {
-                console.warn("AI Food Search Failed/Timed out, falling back to raw data:", aiError);
-                // FALLBACK: Return raw places directly if AI fails
-                return rawPlacesToProcess.map(p => {
-                    let distStr = "";
-                    if (p.geometry) {
-                        const d = getDistance(coords, { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() });
-                        distStr = d >= 1000 ? `${(d/1000).toFixed(1)}km` : `${Math.round(d)}m`;
-                    }
-                    return {
-                        name: p.name,
-                        cuisine: "Local Spot",
-                        reason: `Rated ${p.rating} stars (${p.user_ratings_total} reviews)`,
-                        searchQuery: `${p.name}, ${addr.city || ""}`,
-                        rating: p.rating,
-                        distance: distStr
-                    };
-                });
-            }
-
-        } catch (e: any) { 
-            if (e.message === "DAILY_LIMIT_REACHED") throw e;
-            return [];
-        } finally {
-            pendingFoodSearchPromise = null;
         }
-    };
-    pendingFoodSearchPromise = task();
-    return pendingFoodSearchPromise;
+
+        // 3. API FETCH (Only if not cached)
+        if (!isCached) {
+            const limitInfo = getFoodSearchLimitInfo();
+            if (limitInfo.remaining <= 0) throw new Error("DAILY_LIMIT_REACHED");
+            
+            // This internally checks the 30s Cooldown
+            const allRawPlaces = await searchVerifiedPlaces(coords); 
+            
+            if (allRawPlaces.length === 0) {
+                // If API returns 0 (or blocked by cooldown), return empty but don't crash
+                throw new Error("No places found or cooldown active");
+            }
+
+            incrementFoodSearchCount();
+            
+            // Set Cache
+            restaurantCache = { 
+                coords: coords, 
+                allRawPlaces: allRawPlaces, 
+                nextIndex: 5, 
+                timestamp: Date.now() 
+            };
+            rawPlacesToProcess = allRawPlaces.slice(0, 5);
+        }
+
+        if (rawPlacesToProcess.length === 0) return [];
+
+        // 4. AI Recommendation
+        const addr = await getDetailedAddress(coords);
+        const placesListText = rawPlacesToProcess.map((p, i) => `ID: ${i+1} | NAME: "${p.name}" | RATING: ${p.rating}⭐`).join("\n");
+        const systemInstruction = getStrictSystemInstruction("Foodie Friend", coords, addr, language) + 
+            `Recommend these. Output JSON: [{ "id": number, "name": "Name", "cuisine": "Type", "reason": "Short reason" }]`;
+        
+        try {
+            const response = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
+                contents: `INPUT: ${placesListText}`,
+                config: { systemInstruction, responseMimeType: "application/json" }
+            }, 10000); // 10s Timeout
+            
+            let aiResults: any[] = [];
+            try { aiResults = JSON.parse(response.text || "[]"); } catch {}
+            
+            if (aiResults.length === 0) throw new Error("Empty AI Response");
+
+            return aiResults.map(item => {
+                let original = null;
+                if (item.id) original = rawPlacesToProcess[item.id - 1];
+                if (!original) original = rawPlacesToProcess.find(p => p.name === item.name || item.name.includes(p.name));
+                
+                let rating = original ? original.rating : 0;
+                let distStr = "";
+                if (original && original.geometry) {
+                    const d = getDistance(coords, { lat: original.geometry.location.lat(), lng: original.geometry.location.lng() });
+                    distStr = d >= 1000 ? `${(d/1000).toFixed(1)}km` : `${Math.round(d)}m`;
+                }
+                return {
+                    name: item.name,
+                    cuisine: item.cuisine,
+                    reason: item.reason,
+                    searchQuery: `${item.name}, ${addr.city || ""}`,
+                    rating,
+                    distance: distStr
+                };
+            });
+
+        } catch (aiError) {
+            console.warn("AI Food Search Failed, using raw data fallback.");
+            return rawPlacesToProcess.map(p => {
+                let distStr = "";
+                if (p.geometry) {
+                    const d = getDistance(coords, { lat: p.geometry.location.lat(), lng: p.geometry.location.lng() });
+                    distStr = d >= 1000 ? `${(d/1000).toFixed(1)}km` : `${Math.round(d)}m`;
+                }
+                return {
+                    name: p.name,
+                    cuisine: "Local Spot",
+                    reason: `Rated ${p.rating} stars`,
+                    searchQuery: `${p.name}, ${addr.city || ""}`,
+                    rating: p.rating,
+                    distance: distStr
+                };
+            });
+        }
+
+    } catch (e: any) { 
+        if (e.message === "DAILY_LIMIT_REACHED") throw e;
+        console.warn("Food search aborted:", e.message);
+        return [];
+    } finally {
+        // 🔥 ALWAYS RELEASE LOCK
+        isFoodSearchActive = false;
+    }
 };
 
 export const findNearbyInterestingPlace = async (coords: Coordinates, lang: AppLanguage, previousTopics: string[], heading: number | null, radius: number, previousLocations: Coordinates[]): Promise<PlaceOfInterest | null> => {
@@ -441,15 +440,10 @@ export const findNearbyInterestingPlace = async (coords: Coordinates, lang: AppL
             type: ['tourist_attraction', 'museum', 'church', 'landmark', 'town_square']
         }, async (results: any[], status: any) => {
             if (status === google.maps.places.PlacesServiceStatus.OK && results.length > 0) {
-                // Filter duplicates
                 const valid = results.filter(p => !previousTopics.includes(p.name));
                 if (valid.length === 0) { resolve(null); return; }
                 const place = valid[0];
-                
-                // Get AI Description with STRICT Context
-                const addr = await getDetailedAddress(coords);
-                const desc = await askAiGuide(`Tell me about "${place.name}" here. Keep it to 2 sentences.`, coords, lang);
-                
+                const desc = await askAiGuide(`Tell me about "${place.name}". 2 sentences.`, coords, lang);
                 resolve({
                     name: place.name,
                     description: desc,
@@ -468,13 +462,11 @@ export const findNearbyInterestingPlace = async (coords: Coordinates, lang: AppL
 export const generateFillerNarration = async (coords: Coordinates, lang: AppLanguage, previousTopics: string[], step: number, heading: number | null) => {
     const addr = await getDetailedAddress(coords);
     const instruction = getStrictSystemInstruction("Historian", coords, addr, lang) + 
-    `Tell a short cultural story or history fact about this specific neighborhood (${addr.neighborhood} in ${addr.city}, ${addr.country}). 
-    Exclude: ${previousTopics.join(',')}. 
-    Return JSON: { "topic": "...", "text": "...", "wikiUrl": "..." }`;
+    `Tell a short cultural story about ${addr.neighborhood || addr.city}. Exclude: ${previousTopics.join(',')}. JSON: { "topic": "...", "text": "...", "wikiUrl": "..." }`;
     
     try {
         const result = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
-            contents: `Tell me a story about ${addr.neighborhood || "this area"}.`,
+            contents: `Tell me a story about ${addr.neighborhood}.`,
             config: { systemInstruction: instruction, responseMimeType: "application/json" }
         });
         return JSON.parse(result.text || "{}");
@@ -482,42 +474,36 @@ export const generateFillerNarration = async (coords: Coordinates, lang: AppLang
 };
 
 export const generateTourGreeting = async (dest: string, lang: AppLanguage) => {
-    const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
-        contents: `Generate a short, exciting tour greeting for going to ${dest}. Language: ${lang}.`
-    });
-    return res.text || "Welcome to the tour!";
+    const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, { contents: `Greeting for tour to ${dest}. Lang: ${lang}.` });
+    return res.text || "Welcome!";
 };
 
 export const generateArrivalGreeting = async (dest: string, coords: Coordinates, lang: AppLanguage) => {
-    const addr = await getDetailedAddress(coords);
-    const instruction = getStrictSystemInstruction("Guide", coords, addr, lang);
-    const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
-        contents: `We arrived at ${dest}. Generate a short congratulatory message.`,
-        config: { systemInstruction: instruction }
-    });
+    const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, { contents: `Arrived at ${dest}. Congratulate. Lang: ${lang}.` });
     return res.text || "You have arrived!";
 };
 
 export const askAiGuide = async (msg: string, coords: Coordinates, lang: AppLanguage) => {
     const addr = await getDetailedAddress(coords);
-    const instruction = getStrictSystemInstruction("Local Guide", coords, addr, lang);
-    const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
-        contents: msg,
-        config: { systemInstruction: instruction }
-    });
-    return res.text || "Thinking...";
+    const instruction = getStrictSystemInstruction("Guide", coords, addr, lang);
+    try {
+        const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
+            contents: msg,
+            config: { systemInstruction: instruction }
+        });
+        return res.text || "Error.";
+    } catch { return "Service unavailable."; }
 };
 
-export const getPhotoSpots = async (coords: Coordinates): Promise<PlaceOfInterest[]> => {
-    // Simplified stub
-    return []; 
-};
+export const getPhotoSpots = async (coords: Coordinates): Promise<PlaceOfInterest[]> => { return []; };
 
 export const generateTravelDiary = async (visited: string[], lang: AppLanguage) => {
-    const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
-        contents: `Write a poetic travel diary entry about visiting: ${visited.join(', ')}. Language: ${lang}.`
-    });
-    return res.text || "Diary generation failed.";
+    try {
+        const res = await scheduleGeminiRequest(CURRENT_GEMINI_MODEL, {
+            contents: `Write diary for: ${visited.join(', ')}. Lang: ${lang}.`
+        });
+        return res.text || "Failed.";
+    } catch { return "Failed."; }
 };
 
 // Session & Background

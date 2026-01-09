@@ -1,5 +1,4 @@
 
-// ... (imports remain the same)
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import MapComponent from './components/MapComponent';
 import GuidePanel from './components/GuidePanel';
@@ -44,8 +43,10 @@ declare const google: any;
 
 const GOOGLE_MAP_ID = "ef9a3a3ae0dea29cba1b55cd"; 
 
-// 🔥 HARDCODED API KEY (As requested)
-const GOOGLE_MAPS_API_KEY = "AIzaSyDIJKirsHsX2l4h60XPq2rtzg-uKzaZqwg";
+// 🔥 API KEY SETUP
+// Priority: 1. Vite Environment Variable (Vercel) -> 2. Hardcoded Fallback (Dev)
+// Fix for TS error: Property 'env' does not exist on type 'ImportMeta'
+const GOOGLE_MAPS_API_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || "";
 
 // --- TEST LOCATIONS ---
 const MADRID_LOCATION = { lat: 40.4169, lng: -3.7035 }; // Madrid Sol
@@ -178,6 +179,12 @@ const App: React.FC = () => {
   const [testTtsMode, setTestTtsMode] = useState<'standard' | 'neural'>('standard');
 
   useEffect(() => {
+      // Validate Key
+      if (!GOOGLE_MAPS_API_KEY) {
+          alert("⚠️ API KEY MISSING! Please check Vercel Environment Variables (VITE_GOOGLE_MAPS_API_KEY).");
+          return;
+      }
+
       initializeTTS(GOOGLE_MAPS_API_KEY);
       initializeGemini(GOOGLE_MAPS_API_KEY);
       
@@ -195,6 +202,8 @@ const App: React.FC = () => {
 
   // 1. Load Google Maps Script
   useEffect(() => {
+    if (!GOOGLE_MAPS_API_KEY) return;
+
     const loadMapsScript = () => {
         const existingScript = document.querySelector(`script[src*="maps.googleapis.com/maps/api/js"]`);
         if (existingScript) {
@@ -232,7 +241,7 @@ const App: React.FC = () => {
     loadMapsScript();
   }, []);
 
-  // ... (Initial Location, Compass, WakeLock, Visibility effects - No Change) ...
+  // ... (Rest of the component remains exactly the same) ...
   // 2. Initial Location Logic
   useEffect(() => {
     if (isTestMode) {

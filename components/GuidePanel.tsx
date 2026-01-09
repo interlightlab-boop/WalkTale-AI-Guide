@@ -1,9 +1,12 @@
+
+// ... (imports remain same)
 import React, { useState, useEffect, useRef } from 'react';
 import { PlaceOfInterest, AppLanguage, ChatMessage, Coordinates, RestaurantRecommendation } from '../types';
 import { Navigation, MapPin, Globe, Search, ImageOff, Radio, ChevronUp, ChevronDown, MessageCircle, Mic, Send, Bot, BatteryCharging, Utensils, Loader2, Star, X, ExternalLink, BookOpen, Crown, Layers, Sparkles, Heart, Activity, Infinity, Mail, StopCircle, RotateCcw, AlertCircle, AlertTriangle, Camera, Book, Play, Pause } from 'lucide-react';
 import { askAiGuide, speakText, getAiRecommendedRestaurants, getFoodSearchLimitInfo, stopSpeaking, getGeminiStatus, testGeminiConnection, getPhotoSpots, generateTravelDiary } from '../services/geminiService';
 import { logEvent, getUserStats } from '../services/analyticsService';
 
+// ... (Interface and UI_TEXT remain same)
 export interface GuidePanelProps {
   isWalking: boolean;
   currentPoi: PlaceOfInterest | null;
@@ -23,6 +26,7 @@ export interface GuidePanelProps {
   onAddPois?: (pois: PlaceOfInterest[]) => void;
 }
 
+// ... (UI_TEXT object remains same)
 const UI_TEXT = {
   [AppLanguage.ENGLISH]: {
     guide: "Guide",
@@ -112,45 +116,33 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   onOpenAnalytics,
   onAddPois
 }) => {
+  // ... (State variables remain the same)
   const [isExpanded, setIsExpanded] = useState(false);
   const [isVisible, setIsVisible] = useState(true);
-  
-  // Chat State
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [chatInput, setChatInput] = useState("");
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
-
-  // Restaurant Search State
   const [isSearchingFood, setIsSearchingFood] = useState(false);
   const [showFoodModal, setShowFoodModal] = useState(false);
   const [recommendedRestaurants, setRecommendedRestaurants] = useState<RestaurantRecommendation[]>([]);
   const [remainingFoodSearches, setRemainingFoodSearches] = useState<number>(10);
   const [limitReachedError, setLimitReachedError] = useState(false);
-
-  // Diary State
   const [showDiaryModal, setShowDiaryModal] = useState(false);
   const [diaryContent, setDiaryContent] = useState("");
   const [isGeneratingDiary, setIsGeneratingDiary] = useState(false);
-
-  // Analytics State
   const [isLiked, setIsLiked] = useState(false);
-  
-  // Playback State
   const [isAudioPlaying, setIsAudioPlaying] = useState(false);
-  
-  // Connection Status State
   const [aiStatus, setAiStatus] = useState<'unknown' | 'connected' | 'error'>('unknown');
-
-  // Swipe Logic Refs
   const touchStartY = useRef<number | null>(null);
   const touchEndY = useRef<number | null>(null);
   const minSwipeDistance = 50; 
   
   const t = getTranslation(language);
 
+  // ... (useEffects remain the same)
   useEffect(() => {
     if (currentPoi) {
       if (isVisible) setIsExpanded(true);
@@ -181,6 +173,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
 
   const toggleExpand = () => setIsExpanded(!isExpanded);
 
+  // ... (Touch handlers remain same)
   const onTouchStart = (e: React.TouchEvent) => {
     touchEndY.current = null;
     touchStartY.current = e.targetTouches[0].clientY;
@@ -203,6 +196,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
     }
   };
 
+  // ... (Chat Handlers remain same)
   const handleSendMessage = async () => {
       if(!chatInput.trim()) return;
       const userMsg: ChatMessage = { id: Date.now().toString(), sender: 'user', text: chatInput, timestamp: Date.now() };
@@ -233,10 +227,13 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       recognition.start();
   };
 
+  // 🔥 UPDATED: Find Food Handler
   const handleFindFood = async () => {
-      if (isSearchingFood) return;
+      if (isSearchingFood) return; // Prevent double clicks
+      
       setIsSearchingFood(true);
       setLimitReachedError(false);
+      
       try {
           const recs = await getAiRecommendedRestaurants(currentLocation, language);
           setRecommendedRestaurants(recs);
@@ -245,6 +242,11 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
           if (e.message === "DAILY_LIMIT_REACHED") {
               setLimitReachedError(true);
               setShowFoodModal(true);
+          } else {
+              // Handle general error silently or show empty
+              console.error("Food search error", e);
+              setRecommendedRestaurants([]);
+              setShowFoodModal(true); 
           }
       } finally {
           setIsSearchingFood(false);
@@ -312,27 +314,29 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       return name;
   };
 
-  const ToolButton = ({ onClick, icon: Icon, colorClass, badge }: any) => (
+  // ToolButton Component
+  const ToolButton = ({ onClick, icon: Icon, colorClass, badge, disabled }: any) => (
       <button 
-          onClick={(e) => { e.stopPropagation(); onClick(); }}
-          className={`relative p-3.5 rounded-full backdrop-blur-md shadow-sm border border-white/50 transition-all hover:scale-105 active:scale-95 ${colorClass}`}
+          onClick={(e) => { 
+              if (disabled) return;
+              e.stopPropagation(); 
+              onClick(); 
+          }}
+          disabled={disabled}
+          className={`relative p-3.5 rounded-full backdrop-blur-md shadow-sm border border-white/50 transition-all hover:scale-105 active:scale-95 ${colorClass} ${disabled ? 'opacity-50 cursor-not-allowed grayscale' : ''}`}
       >
-          <Icon size={20} strokeWidth={2} />
+          <Icon size={20} strokeWidth={2} className={disabled ? 'animate-spin' : ''} />
           {badge}
       </button>
   );
 
   return (
     <>
+      {/* ... (Previous modals remain same) ... */}
       {!isVisible && (
          <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-[400] animate-in zoom-in duration-300">
-             <button
-                 onClick={() => setIsVisible(true)}
-                 className="glass bg-white/80 text-slate-800 shadow-xl px-5 py-3 rounded-full flex items-center gap-2 font-bold text-sm hover:scale-105 active:scale-95 transition-all"
-             >
-                 <ChevronUp size={18} className="text-indigo-600" />
-                 {t.guide}
-                 {isWalking && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-1" />}
+             <button onClick={() => setIsVisible(true)} className="glass bg-white/80 text-slate-800 shadow-xl px-5 py-3 rounded-full flex items-center gap-2 font-bold text-sm hover:scale-105 active:scale-95 transition-all">
+                 <ChevronUp size={18} className="text-indigo-600" />{t.guide}{isWalking && <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse ml-1" />}
              </button>
          </div>
       )}
@@ -341,21 +345,11 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
           <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in" onClick={() => setShowDiaryModal(false)}>
               <div className="bg-white w-full max-w-sm rounded-[32px] p-6 relative shadow-2xl" onClick={e => e.stopPropagation()}>
                   <button onClick={() => setShowDiaryModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><X size={20}/></button>
-                  <div className="flex items-center gap-2 mb-4 text-purple-600">
-                      <Book size={24} />
-                      <h3 className="font-bold text-lg text-slate-900">{t.diary}</h3>
-                  </div>
+                  <div className="flex items-center gap-2 mb-4 text-purple-600"><Book size={24} /><h3 className="font-bold text-lg text-slate-900">{t.diary}</h3></div>
                   <div className="bg-purple-50/50 rounded-2xl p-4 min-h-[200px] max-h-[50vh] overflow-y-auto custom-scrollbar text-sm leading-relaxed text-slate-700 whitespace-pre-wrap font-medium">
-                      {isGeneratingDiary ? (
-                          <div className="flex flex-col items-center justify-center h-full py-10 gap-2 text-slate-400">
-                              <Loader2 size={32} className="animate-spin text-purple-400" />
-                              <p className="text-xs">Writing your story...</p>
-                          </div>
-                      ) : diaryContent}
+                      {isGeneratingDiary ? (<div className="flex flex-col items-center justify-center h-full py-10 gap-2 text-slate-400"><Loader2 size={32} className="animate-spin text-purple-400" /><p className="text-xs">Writing your story...</p></div>) : diaryContent}
                   </div>
-                  <button onClick={() => { navigator.clipboard.writeText(diaryContent); alert("Copied!"); }} className="w-full mt-4 py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-transform">
-                      Copy to Clipboard
-                  </button>
+                  <button onClick={() => { navigator.clipboard.writeText(diaryContent); alert("Copied!"); }} className="w-full mt-4 py-3 bg-purple-600 text-white rounded-xl font-bold shadow-lg shadow-purple-200 active:scale-95 transition-transform">Copy to Clipboard</button>
               </div>
           </div>
       )}
@@ -364,10 +358,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
         <div className="fixed inset-0 z-[9999] bg-black/60 backdrop-blur-md flex items-end sm:items-center justify-center p-4 animate-in fade-in duration-200" onClick={() => setShowFoodModal(false)}>
             <div className="bg-white w-full max-w-sm rounded-[32px] shadow-2xl overflow-hidden flex flex-col max-h-[80vh]" onClick={e => e.stopPropagation()}>
                 <div className="p-5 border-b border-gray-100 flex justify-between items-center bg-orange-50/50">
-                    <h3 className="font-bold text-slate-900 flex items-center gap-2 text-lg">
-                        <div className="p-2 bg-orange-100 rounded-full text-orange-600"><Utensils size={18} /></div>
-                        {t.foodTitle}
-                    </h3>
+                    <h3 className="font-bold text-slate-900 flex items-center gap-2 text-lg"><div className="p-2 bg-orange-100 rounded-full text-orange-600"><Utensils size={18} /></div>{t.foodTitle}</h3>
                     <button onClick={() => setShowFoodModal(false)} className="p-2 text-slate-400 hover:text-slate-600 bg-white rounded-full shadow-sm"><X size={20} /></button>
                 </div>
                 <div className="p-4 overflow-y-auto custom-scrollbar bg-slate-50/50 flex-1">
@@ -390,18 +381,8 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                                     <div className="relative z-10">
                                         <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                                             <h4 className="font-bold text-slate-900 text-lg group-hover:text-orange-600 transition-colors leading-tight mr-1">{rest.name}</h4>
-                                            {rest.rating && rest.rating > 0 && (
-                                                <span className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-yellow-100 px-1.5 py-0.5 rounded-md">
-                                                    <Star size={10} fill="currentColor" className="text-yellow-500" />
-                                                    {rest.rating}
-                                                </span>
-                                            )}
-                                            {rest.distance && (
-                                                <span className="flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md">
-                                                    <MapPin size={10} />
-                                                    {rest.distance}
-                                                </span>
-                                            )}
+                                            {rest.rating && rest.rating > 0 && <span className="flex items-center gap-1 text-xs font-bold text-slate-700 bg-yellow-100 px-1.5 py-0.5 rounded-md"><Star size={10} fill="currentColor" className="text-yellow-500" />{rest.rating}</span>}
+                                            {rest.distance && <span className="flex items-center gap-1 text-xs font-medium text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded-md"><MapPin size={10} />{rest.distance}</span>}
                                         </div>
                                         <div className="flex items-center gap-2 mb-3">
                                             <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-bold">{rest.cuisine}</span>
@@ -419,22 +400,19 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
         </div>
       )}
 
+      {/* Main Panel */}
       <div 
         className={`fixed bottom-0 left-0 right-0 z-[500] glass bg-white/85 backdrop-blur-xl rounded-t-[32px] shadow-[0_-10px_40px_rgba(0,0,0,0.1)] transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] flex flex-col border-t border-white/50`}
         style={{ height: '75vh', transform: !isVisible ? 'translateY(120%)' : isExpanded ? 'translateY(0)' : 'translateY(calc(100% - 170px))' }}
       >
         <div onTouchStart={onTouchStart} onTouchMove={onTouchMove} onTouchEnd={onTouchEnd} onClick={(e) => { if (!touchStartY.current || !touchEndY.current || Math.abs(touchStartY.current - touchEndY.current) < 10) toggleExpand(); }} className="w-full relative flex items-center justify-center pt-5 pb-3 bg-transparent cursor-grab active:cursor-grabbing touch-none">
             <div className="w-12 h-1.5 bg-slate-200/80 rounded-full"></div>
-            
-            {aiStatus === 'error' && (
-                <button onClick={(e) => { e.stopPropagation(); testGeminiConnection(); }} className="absolute right-6 top-4 flex items-center gap-1.5 bg-red-50 text-red-600 px-3 py-1.5 rounded-full text-xs font-bold border border-red-100 animate-pulse">
-                    <AlertCircle size={14} /> AI Error
-                </button>
-            )}
+            {aiStatus === 'error' && <button onClick={(e) => { e.stopPropagation(); testGeminiConnection(); }} className="absolute right-6 top-4 flex items-center gap-1.5 bg-red-50 text-red-600 px-3 py-1.5 rounded-full text-xs font-bold border border-red-100 animate-pulse"><AlertCircle size={14} /> AI Error</button>}
         </div>
 
         <div className="px-6 pb-6 overflow-y-auto custom-scrollbar flex-1">
           
+          {/* Toolbar */}
           <div className="flex justify-between items-center mb-6 overflow-x-auto no-scrollbar py-2">
              <div className="flex gap-3">
                 <ToolButton onClick={onToggleBatterySaver} icon={BatteryCharging} colorClass="bg-emerald-50 text-emerald-600 hover:bg-emerald-100" />
@@ -442,6 +420,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                     onClick={handleFindFood} 
                     icon={isSearchingFood ? Loader2 : Utensils} 
                     colorClass="bg-orange-50 text-orange-600 hover:bg-orange-100" 
+                    disabled={isSearchingFood}
                     badge={remainingFoodSearches < 20 ? <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center shadow border border-white">{remainingFoodSearches}</div> : null} 
                 />
                 <ToolButton onClick={handleFindPhotoSpots} icon={Camera} colorClass="bg-pink-50 text-pink-600 hover:bg-pink-100" />
@@ -450,19 +429,15 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 <ToolButton onClick={handleSendFeedback} icon={Mail} colorClass="bg-blue-50 text-blue-600 hover:bg-blue-100" />
                 {onOpenAnalytics && <ToolButton onClick={onOpenAnalytics} icon={Activity} colorClass="bg-slate-50 text-slate-600 hover:bg-slate-100" />}
             </div>
-            
             <div className="flex gap-2 pl-4 border-l border-slate-200 ml-2">
                 <ToolButton onClick={onOpenPricing} icon={Crown} colorClass="bg-amber-50 text-amber-600 hover:bg-amber-100 border-amber-200" />
                 <ToolButton onClick={onOpenLangSettings} icon={Globe} colorClass="bg-indigo-50 text-indigo-600 hover:bg-indigo-100" />
             </div>
           </div>
 
+          {/* ... (Rest of panel content same) */}
           <div className="mb-6">
-             <button 
-                onClick={(e) => { e.stopPropagation(); isWalking ? onStopWalking() : onStartWalking(); }} 
-                disabled={!hasDestination && !isWalking} 
-                className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl font-bold text-lg text-white transition-all transform active:scale-[0.98] shadow-lg ${!hasDestination && !isWalking ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : isWalking ? 'bg-gradient-to-r from-red-500 to-rose-600 hover:shadow-red-200' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:shadow-indigo-200'}`}
-             >
+             <button onClick={(e) => { e.stopPropagation(); isWalking ? onStopWalking() : onStartWalking(); }} disabled={!hasDestination && !isWalking} className={`w-full flex items-center justify-center gap-3 px-6 py-4 rounded-2xl font-bold text-lg text-white transition-all transform active:scale-[0.98] shadow-lg ${!hasDestination && !isWalking ? 'bg-slate-200 text-slate-400 cursor-not-allowed shadow-none' : isWalking ? 'bg-gradient-to-r from-red-500 to-rose-600 hover:shadow-red-200' : 'bg-gradient-to-r from-indigo-600 to-purple-600 hover:shadow-indigo-200'}`}>
               {isWalking ? <>{t.end}</> : <><Navigation size={20} fill="currentColor" /> {t.start}</>}
             </button>
           </div>
@@ -471,101 +446,33 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
               {isWalking && currentPoi ? (
                 <div className="animate-in fade-in slide-in-from-bottom-5 duration-500">
                    <div className="flex justify-between items-start mb-3">
-                      <div className="flex items-center gap-2 text-indigo-600 text-[11px] font-bold uppercase tracking-wider bg-indigo-50 px-2.5 py-1.5 rounded-lg border border-indigo-100/50">
-                          <MapPin size={12} />
-                          {currentPoi.category}
-                      </div>
+                      <div className="flex items-center gap-2 text-indigo-600 text-[11px] font-bold uppercase tracking-wider bg-indigo-50 px-2.5 py-1.5 rounded-lg border border-indigo-100/50"><MapPin size={12} />{currentPoi.category}</div>
                       <div className="flex items-center gap-3">
-                        <button onClick={handleLike} className={`p-2 rounded-full transition-all ${isLiked ? 'bg-red-50 text-red-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}>
-                            <Heart size={20} fill={isLiked ? "currentColor" : "none"} />
-                        </button>
+                        <button onClick={handleLike} className={`p-2 rounded-full transition-all ${isLiked ? 'bg-red-50 text-red-500 scale-110 shadow-sm' : 'bg-slate-50 text-slate-400 hover:bg-slate-100'}`}><Heart size={20} fill={isLiked ? "currentColor" : "none"} /></button>
                         {currentPoi.googleMapsUrl && <a href={currentPoi.googleMapsUrl} target="_blank" rel="noreferrer" className="text-xs text-slate-400 hover:text-indigo-600 font-medium underline decoration-slate-300 underline-offset-2 transition-colors">{t.openMap}</a>}
                       </div>
                    </div>
-                   
                    <h2 className="text-2xl font-black text-slate-900 mb-4 leading-tight tracking-tight">{getDisplayTitle(currentPoi.name)}</h2>
-                   
                    <div className="relative rounded-2xl overflow-hidden mb-5 w-full aspect-video bg-slate-100 shadow-inner group">
-                      {currentPoi.imageUrl ? (
-                          <img src={currentPoi.imageUrl} alt={currentPoi.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.add('bg-slate-100'); }} />
-                      ) : (
-                          <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-200"><ImageOff size={40} /></div>
-                      )}
-                      
+                      {currentPoi.imageUrl ? <img src={currentPoi.imageUrl} alt={currentPoi.name} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.parentElement?.classList.add('bg-slate-100'); }} /> : <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-indigo-50 to-purple-50 text-indigo-200"><ImageOff size={40} /></div>}
                       <div className="absolute inset-x-0 bottom-0 p-4 bg-gradient-to-t from-black/60 to-transparent flex items-end justify-between">
-                          <div className="flex gap-1 items-end h-4 pb-1">
-                             {isAudioPlaying && (
-                                <>
-                                <div className="w-1 bg-white animate-[bounce_1s_infinite] h-2 rounded-full"></div>
-                                <div className="w-1 bg-white animate-[bounce_1.2s_infinite] h-4 rounded-full"></div>
-                                <div className="w-1 bg-white animate-[bounce_0.8s_infinite] h-3 rounded-full"></div>
-                                <span className="text-[10px] text-white/90 font-medium ml-1.5">{t.play}</span>
-                                </>
-                             )}
-                          </div>
+                          <div className="flex gap-1 items-end h-4 pb-1">{isAudioPlaying && (<><div className="w-1 bg-white animate-[bounce_1s_infinite] h-2 rounded-full"></div><div className="w-1 bg-white animate-[bounce_1.2s_infinite] h-4 rounded-full"></div><div className="w-1 bg-white animate-[bounce_0.8s_infinite] h-3 rounded-full"></div><span className="text-[10px] text-white/90 font-medium ml-1.5">{t.play}</span></>)}</div>
                           <div className="flex gap-2">
-                             {isAudioPlaying ? (
-                                  <button onClick={handleStopAudio} className="w-10 h-10 bg-white text-black rounded-full flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all">
-                                      <Pause size={18} fill="currentColor" />
-                                  </button>
-                             ) : (
-                                  <button onClick={handleReplayAudio} className="w-10 h-10 bg-white/90 backdrop-blur text-indigo-600 rounded-full flex items-center justify-center shadow-lg hover:bg-white hover:scale-105 active:scale-95 transition-all">
-                                      <Play size={18} fill="currentColor" className="ml-0.5" />
-                                  </button>
-                             )}
+                             {isAudioPlaying ? <button onClick={handleStopAudio} className="w-10 h-10 bg-white text-black rounded-full flex items-center justify-center shadow-lg hover:scale-105 active:scale-95 transition-all"><Pause size={18} fill="currentColor" /></button> : <button onClick={handleReplayAudio} className="w-10 h-10 bg-white/90 backdrop-blur text-indigo-600 rounded-full flex items-center justify-center shadow-lg hover:bg-white hover:scale-105 active:scale-95 transition-all"><Play size={18} fill="currentColor" className="ml-0.5" /></button>}
                           </div>
                       </div>
                    </div>
-
-                   <div className="prose prose-sm prose-slate max-w-none mb-4">
-                       <p className="text-slate-700 text-[15px] leading-relaxed font-normal">{currentPoi.description}</p>
-                   </div>
-
-                   {currentPoi.wikipediaUrl && (
-                       <a href={currentPoi.wikipediaUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-slate-700 font-semibold text-sm hover:bg-slate-100 hover:border-slate-200 transition-all shadow-sm group">
-                           <span className="flex items-center gap-2"><BookOpen size={16} className="text-slate-400 group-hover:text-indigo-500 transition-colors" /> {t.wiki}</span>
-                           <ExternalLink size={14} className="text-slate-300 group-hover:text-slate-500" />
-                       </a>
-                   )}
-
-                   <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end items-center gap-2">
-                       <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-md">
-                           <Sparkles size={10} className="text-purple-400" /> {t.aiSource}
-                       </span>
-                   </div>
+                   <div className="prose prose-sm prose-slate max-w-none mb-4"><p className="text-slate-700 text-[15px] leading-relaxed font-normal">{currentPoi.description}</p></div>
+                   {currentPoi.wikipediaUrl && <a href={currentPoi.wikipediaUrl} target="_blank" rel="noreferrer" className="flex items-center justify-between px-4 py-3 bg-slate-50 border border-slate-100 rounded-xl text-slate-700 font-semibold text-sm hover:bg-slate-100 hover:border-slate-200 transition-all shadow-sm group"><span className="flex items-center gap-2"><BookOpen size={16} className="text-slate-400 group-hover:text-indigo-500 transition-colors" /> {t.wiki}</span><ExternalLink size={14} className="text-slate-300 group-hover:text-slate-500" /></a>}
+                   <div className="mt-6 pt-4 border-t border-slate-100 flex justify-end items-center gap-2"><span className="text-[10px] text-slate-400 font-medium flex items-center gap-1 bg-slate-50 px-2 py-1 rounded-md"><Sparkles size={10} className="text-purple-400" /> {t.aiSource}</span></div>
                 </div>
               ) : isWalking ? (
                 <div className="text-center py-6">
-                   {!isExpanded ? (
-                       <p className="text-sm text-slate-500 flex items-center justify-center gap-2 font-medium animate-pulse"><Radio size={16} className="text-indigo-500" /> {t.look}</p>
-                   ) : (
-                       <div className="py-8 bg-indigo-50/30 rounded-3xl border border-indigo-100/50 flex flex-col items-center">
-                           <div className="relative w-16 h-16 mb-4">
-                               <div className="absolute inset-0 bg-indigo-500 rounded-full opacity-10 animate-ping"></div>
-                               <div className="relative w-full h-full bg-white rounded-full flex items-center justify-center shadow-md text-indigo-600">
-                                   <Radio size={28} />
-                               </div>
-                           </div>
-                           <h3 className="font-bold text-slate-900 text-lg mb-1">{t.scanning}</h3>
-                           <p className="text-sm text-slate-500">{t.walk}</p>
-                       </div>
-                   )}
+                   {!isExpanded ? <p className="text-sm text-slate-500 flex items-center justify-center gap-2 font-medium animate-pulse"><Radio size={16} className="text-indigo-500" /> {t.look}</p> : <div className="py-8 bg-indigo-50/30 rounded-3xl border border-indigo-100/50 flex flex-col items-center"><div className="relative w-16 h-16 mb-4"><div className="absolute inset-0 bg-indigo-500 rounded-full opacity-10 animate-ping"></div><div className="relative w-full h-full bg-white rounded-full flex items-center justify-center shadow-md text-indigo-600"><Radio size={28} /></div></div><h3 className="font-bold text-slate-900 text-lg mb-1">{t.scanning}</h3><p className="text-sm text-slate-500">{t.walk}</p></div>}
                 </div>
               ) : (
                 <div className={`text-center transition-opacity duration-300 ${isExpanded ? 'opacity-100 py-10' : 'opacity-100 py-2'}`}>
-                  {!hasDestination ? (
-                      <div className="flex flex-col items-center">
-                          {isExpanded && <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400"><Search size={32} /></div>}
-                          <h3 className={`font-bold text-slate-800 ${isExpanded ? 'text-xl mb-2' : 'text-base mb-1'}`}>{t.where}</h3>
-                          <p className="text-slate-500 text-sm">{t.searchPrompt}</p>
-                      </div>
-                  ) : (
-                      <div className="flex flex-col items-center">
-                          {isExpanded && <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-4 text-indigo-600 shadow-sm"><Navigation size={32} /></div>}
-                          <h3 className={`font-bold text-slate-800 ${isExpanded ? 'text-xl mb-2' : 'text-base mb-1'}`}>{t.ready}</h3>
-                          {isExpanded && <p className="text-slate-500 text-sm">{t.pressStart}</p>}
-                      </div>
-                  )}
+                  {!hasDestination ? <div className="flex flex-col items-center">{isExpanded && <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4 text-slate-400"><Search size={32} /></div>}<h3 className={`font-bold text-slate-800 ${isExpanded ? 'text-xl mb-2' : 'text-base mb-1'}`}>{t.where}</h3><p className="text-slate-500 text-sm">{t.searchPrompt}</p></div> : <div className="flex flex-col items-center">{isExpanded && <div className="w-16 h-16 bg-indigo-100 rounded-full flex items-center justify-center mb-4 text-indigo-600 shadow-sm"><Navigation size={32} /></div>}<h3 className={`font-bold text-slate-800 ${isExpanded ? 'text-xl mb-2' : 'text-base mb-1'}`}>{t.ready}</h3>{isExpanded && <p className="text-slate-500 text-sm">{t.pressStart}</p>}</div>}
                 </div>
               )}
           </div>

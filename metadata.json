@@ -1,0 +1,8 @@
+{
+  "name": "WalkTale AI Guide",
+  "description": "An AI-powered walking tour guide (WalkTale) that narrates interesting landmarks, restaurants, and history as you walk, simulating a local expert in your language.",
+  "requestFramePermissions": [
+    "geolocation",
+    "microphone"
+  ]
+}

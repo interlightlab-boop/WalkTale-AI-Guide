@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { X, Clock, Map, Mic2, Cpu, FileText, ScrollText, DollarSign, MapPin, Navigation, Users, TrendingUp, AlertTriangle } from 'lucide-react';
+import { X, Clock, Map, Mic2, Cpu, FileText, ScrollText, DollarSign, MapPin, Navigation, Users, TrendingUp, AlertTriangle, Utensils, Binoculars } from 'lucide-react';
 import { TourSessionReport } from '../types';
 
 interface TestReportModalProps {
@@ -55,11 +55,16 @@ const TestReportModal: React.FC<TestReportModalProps> = ({ report, onClose }) =>
   
   const costMapLoad = (report.stats.mapsUsage.mapLoads / 1000) * RATE_MAP_LOAD;
   const costGeocoding = (report.stats.mapsUsage.geocodingCalls / 1000) * RATE_GEOCODING;
-  const costPlaces = (report.stats.mapsUsage.placesCalls / 1000) * RATE_PLACES;
+  
+  // Split Places Costs
+  const costPlacesFood = (report.stats.mapsUsage.placesFoodCalls / 1000) * RATE_PLACES;
+  const costPlacesLandmark = (report.stats.mapsUsage.placesLandmarkCalls / 1000) * RATE_PLACES;
+  const totalPlacesCost = costPlacesFood + costPlacesLandmark;
+
   const costDirections = (report.stats.mapsUsage.directionsCalls / 1000) * RATE_DIRECTIONS;
 
   const totalAiCost = costInput + costOutput + costTts;
-  const totalMapsCost = costMapLoad + costGeocoding + costPlaces + costDirections;
+  const totalMapsCost = costMapLoad + costGeocoding + totalPlacesCost + costDirections;
   const totalUsd = totalAiCost + totalMapsCost;
   const totalKrw = Math.round(totalUsd * EXCHANGE_RATE);
 
@@ -186,14 +191,28 @@ const TestReportModal: React.FC<TestReportModalProps> = ({ report, onClose }) =>
                <MapPin size={16} className="text-red-500" /> Google Maps API Usage
             </h3>
             <div className="space-y-3">
-                <div className="flex justify-between items-center p-2 bg-red-50 rounded-lg border border-red-100">
-                    <div className="text-xs text-red-900">
-                        <span className="font-bold block">Places API (Restaurant)</span>
-                        <span className="text-[10px] text-red-400">$32.00 / 1k requests</span>
+                
+                {/* 🔥 SPLIT: Restaurant Search (User triggered) */}
+                <div className="flex justify-between items-center p-2 bg-orange-50 rounded-lg border border-orange-100">
+                    <div className="text-xs text-orange-900">
+                        <span className="font-bold flex items-center gap-1"><Utensils size={10} /> Restaurant Search</span>
+                        <span className="text-[10px] text-orange-400">$32.00 / 1k requests</span>
                     </div>
                     <div className="text-right">
-                        <div className="text-sm font-bold text-red-700">{report.stats.mapsUsage.placesCalls} calls</div>
-                        <div className="text-[10px] text-red-500 font-mono">${costPlaces.toFixed(4)}</div>
+                        <div className="text-sm font-bold text-orange-700">{report.stats.mapsUsage.placesFoodCalls} calls</div>
+                        <div className="text-[10px] text-orange-500 font-mono">${costPlacesFood.toFixed(4)}</div>
+                    </div>
+                </div>
+
+                {/* 🔥 SPLIT: Landmark Search (Auto/Tour triggered) */}
+                <div className="flex justify-between items-center p-2 bg-blue-50 rounded-lg border border-blue-100">
+                    <div className="text-xs text-blue-900">
+                        <span className="font-bold flex items-center gap-1"><Binoculars size={10} /> Landmark Scan (Tour)</span>
+                        <span className="text-[10px] text-blue-400">$32.00 / 1k requests</span>
+                    </div>
+                    <div className="text-right">
+                        <div className="text-sm font-bold text-blue-700">{report.stats.mapsUsage.placesLandmarkCalls} calls</div>
+                        <div className="text-[10px] text-blue-500 font-mono">${costPlacesLandmark.toFixed(4)}</div>
                     </div>
                 </div>
 

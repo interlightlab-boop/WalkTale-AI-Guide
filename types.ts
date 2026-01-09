@@ -94,7 +94,9 @@ export interface TourSessionReport {
         mapsUsage: {
             mapLoads: number;
             geocodingCalls: number;
-            placesCalls: number;
+            // 🔥 SPLIT METRICS
+            placesFoodCalls: number; 
+            placesLandmarkCalls: number;
             directionsCalls: number;
         }
     };

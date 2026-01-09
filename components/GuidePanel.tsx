@@ -163,6 +163,7 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
   }, [chatHistory, isChatOpen]);
 
   useEffect(() => {
+      // Check limit on mount
       const info = getFoodSearchLimitInfo();
       setRemainingFoodSearches(info.remaining);
       const interval = setInterval(() => {
@@ -235,21 +236,34 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
       setLimitReachedError(false);
       
       try {
+          // This function handles caching internally.
+          // If cached, it returns next 5 without calling Places API.
+          // If limit reached, it throws "DAILY_LIMIT_REACHED".
           const recs = await getAiRecommendedRestaurants(currentLocation, language);
-          setRecommendedRestaurants(recs);
-          setShowFoodModal(true);
+          
+          if (recs && recs.length > 0) {
+              setRecommendedRestaurants(recs);
+              setShowFoodModal(true);
+          } else {
+             // If array empty, maybe no results found
+             setRecommendedRestaurants([]);
+             setShowFoodModal(true);
+          }
+
       } catch (e: any) {
           if (e.message === "DAILY_LIMIT_REACHED") {
               setLimitReachedError(true);
+              setRecommendedRestaurants([]); // Clear prev
               setShowFoodModal(true);
           } else {
-              // Handle general error silently or show empty
+              // Handle general error
               console.error("Food search error", e);
               setRecommendedRestaurants([]);
               setShowFoodModal(true); 
           }
       } finally {
           setIsSearchingFood(false);
+          // Update UI badge
           const info = getFoodSearchLimitInfo();
           setRemainingFoodSearches(info.remaining);
       }
@@ -363,10 +377,15 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 </div>
                 <div className="p-4 overflow-y-auto custom-scrollbar bg-slate-50/50 flex-1">
                     {limitReachedError ? (
-                        <div className="text-center py-10 px-6">
-                             <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4"><AlertTriangle size={32} className="text-red-500" /></div>
-                             <h3 className="text-lg font-bold text-slate-900 mb-2">Limit Reached</h3>
-                             <p className="text-sm text-slate-500">Daily limit exceeded. Try again tomorrow.</p>
+                        <div className="text-center py-12 px-6">
+                             <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6"><AlertTriangle size={40} className="text-red-500" /></div>
+                             <h3 className="text-xl font-bold text-slate-900 mb-2">Daily Limit Reached</h3>
+                             <p className="text-sm text-slate-500 leading-relaxed mb-6">
+                                 {language === AppLanguage.KOREAN ? "오늘의 식당 검색 횟수(10회)를 모두 사용했습니다." : "You have used all 10 restaurant searches for today."}
+                                 <br/>
+                                 {language === AppLanguage.KOREAN ? "24시간 후에 다시 시도해주세요." : "Please try again in 24 hours."}
+                             </p>
+                             <button onClick={() => setShowFoodModal(false)} className="w-full py-3 bg-gray-900 text-white rounded-xl font-bold">OK</button>
                         </div>
                     ) : recommendedRestaurants.length === 0 ? (
                         <div className="text-center py-12">
@@ -419,9 +438,13 @@ const GuidePanel: React.FC<GuidePanelProps> = ({
                 <ToolButton 
                     onClick={handleFindFood} 
                     icon={isSearchingFood ? Loader2 : Utensils} 
-                    colorClass="bg-orange-50 text-orange-600 hover:bg-orange-100" 
+                    colorClass={remainingFoodSearches === 0 ? "bg-gray-100 text-gray-400 border-gray-200" : "bg-orange-50 text-orange-600 hover:bg-orange-100"} 
                     disabled={isSearchingFood}
-                    badge={remainingFoodSearches < 20 ? <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-500 rounded-full text-white text-[9px] font-bold flex items-center justify-center shadow border border-white">{remainingFoodSearches}</div> : null} 
+                    badge={
+                        <div className={`absolute -top-1 -right-1 w-4 h-4 rounded-full text-white text-[9px] font-bold flex items-center justify-center shadow border border-white ${remainingFoodSearches === 0 ? 'bg-gray-400' : 'bg-emerald-500'}`}>
+                            {remainingFoodSearches}
+                        </div>
+                    } 
                 />
                 <ToolButton onClick={handleFindPhotoSpots} icon={Camera} colorClass="bg-pink-50 text-pink-600 hover:bg-pink-100" />
                 <ToolButton onClick={handleGenerateDiary} icon={Book} colorClass="bg-purple-50 text-purple-600 hover:bg-purple-100" />
